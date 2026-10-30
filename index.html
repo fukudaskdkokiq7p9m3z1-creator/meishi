@@ -45,6 +45,14 @@ button,input,textarea,select{font:inherit;color:inherit}
 /* 一覧 */
 .search{padding:4px 16px 12px}
 .search input{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:16px}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);margin:0 16px 10px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--surface)}
+.seg button{min-height:40px;border:0;background:none;font-size:14px;font-weight:700;color:var(--steel);cursor:pointer}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--on-accent)}
+.gyo{display:flex;gap:6px;padding:0 16px 10px;overflow-x:auto}
+.jump{flex:0 0 auto;min-width:38px;min-height:38px;border:1px solid var(--line);border-radius:6px;background:var(--surface);font-weight:700;cursor:pointer}
+.jump:disabled{opacity:.3;cursor:default}
+.gh{position:sticky;top:env(safe-area-inset-top,0px);z-index:2;background:var(--paper);padding:5px 16px;font-size:14px;font-weight:700;color:var(--steel);border-bottom:1px solid var(--line)}
 .list{border-top:1px solid var(--line)}
 .row{display:block;width:100%;text-align:left;background:var(--surface);border:0;border-bottom:1px solid var(--line);padding:14px 16px;cursor:pointer}
 .row:active{background:var(--paper)}
@@ -114,6 +122,12 @@ progress{width:100%;height:10px;accent-color:var(--accent)}
   <section id="v-list" class="view">
     <div class="topbar"><h1>名刺帳</h1><span class="count" id="count"></span></div>
     <div class="search"><input id="q" type="search" placeholder="名前・会社・メモなどで検索" autocomplete="off" aria-label="検索"></div>
+    <div class="seg" role="group" aria-label="並び順">
+      <button type="button" data-sort="name">氏名順</button>
+      <button type="button" data-sort="company">会社名順</button>
+      <button type="button" data-sort="recent">登録順</button>
+    </div>
+    <div class="gyo" id="gyo" hidden></div>
     <div class="list" id="list"></div>
   </section>
 
@@ -206,7 +220,9 @@ function busy(msg, ratio) {
 
 const FIELDS = [
   ['name', '氏名', 'text'],
+  ['nameKana', '氏名のよみ（ひらがな）　例：やまだ たろう', 'text'],
   ['company', '会社名', 'text'],
+  ['companyKana', '会社名のよみ（ひらがな）', 'text'],
   ['department', '部署', 'text'],
   ['title', '役職', 'text'],
   ['phone', '電話', 'tel'],
@@ -345,6 +361,7 @@ const RE = {
   nameEn: /^[A-Z][A-Za-z.\-']+(\s[A-Z][A-Za-z.\-']*)?\s[A-Z][A-Za-z.\-']+$/,
 };
 
+function toHira(s) { return s.replace(/[ァ-ヶ]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0x60)); }
 const TITLE_G = new RegExp(RE.title.source, 'gi');
 const NAME_ONLY = new RegExp('^[' + CJK + 'ー]+$');
 const NOT_NAME = /部|課|室|営業|技術|製造|総務|開発|品質|工場|支店|本社|事業/;
@@ -435,6 +452,12 @@ function parseCard(text) {
       rest.find((l) => l.length <= 10 && new RegExp('[' + CJK + ']').test(l) && !hasDigit(l) && !RE.company.test(l)) || '';
   }
 
+  // 名刺にふりがなが印刷されていれば、そのままよみとして使う
+  const KANA_LINE = /^[ぁ-んァ-ヶー]{3,16}$/;
+  const kanaLine = rest.find((l) => KANA_LINE.test(l) && l !== r.name);
+  if (KANA_LINE.test(r.name)) r.nameKana = toHira(r.name);
+  else if (kanaLine) r.nameKana = toHira(kanaLine);
+
   r.metOn = new Date().toISOString().slice(0, 10);
   return r;
 }
@@ -455,31 +478,81 @@ function show(name) {
   window.scrollTo(0, 0);
 }
 
-const norm = (s) => String(s || '').normalize('NFKC').toLowerCase();
+const norm = (s) => toHira(String(s || '').normalize('NFKC').toLowerCase());
 const searchText = (c) => norm(FIELDS.map(([k]) => c[k]).join(' '));
 
 async function refresh() { cards = (await dbAll()).sort((a, b) => b.createdAt - a.createdAt); }
+
+let sortMode = 'name';
+try { sortMode = localStorage.getItem('meishi.sort') || 'name'; } catch {}
+
+const GYO_TABLE = [
+  ['あ行', 'あいうえおぁぃぅぇぉゔ'], ['か行', 'かきくけこがぎぐげご'], ['さ行', 'さしすせそざじずぜぞ'],
+  ['た行', 'たちつてとだぢづでどっ'], ['な行', 'なにぬねの'], ['は行', 'はひふへほばびぶべぼぱぴぷぺぽ'],
+  ['ま行', 'まみむめも'], ['や行', 'やゆよゃゅょ'], ['ら行', 'らりるれろ'], ['わ行', 'わをんゐゑゎ'],
+];
+const G_OTHER = '英数・他', G_NONE = 'よみ未設定';
+const readingOf = (c, mode) => toHira(String((mode === 'company' ? c.companyKana : c.nameKana) || '').normalize('NFKC').replace(/\s+/g, ''));
+function gyoOf(reading) {
+  const ch = reading[0];
+  if (!ch) return G_NONE;
+  for (const [g, set] of GYO_TABLE) if (set.includes(ch)) return g;
+  return G_OTHER;
+}
+
+function rowFor(c) {
+  const tags = (c.tags || '').split(/[,、，]/).map((t) => t.trim()).filter(Boolean);
+  return h('button', { class: 'row', type: 'button', onclick: () => openEdit(c) },
+    h('div', { class: 'co' }, c.company || '（会社名なし）'),
+    h('div', { class: 'nm' }, c.name || '（氏名なし）'),
+    (c.department || c.title) && h('div', { class: 'sub' }, [c.department, c.title].filter(Boolean).join('　')),
+    tags.length > 0 && h('div', { class: 'tags' }, tags.map((t) => h('span', { class: 'tag' }, t))));
+}
 
 function renderList() {
   const q = norm($('#q').value).trim();
   const hit = q ? cards.filter((c) => q.split(/\s+/).every((w) => searchText(c).includes(w))) : cards;
   $('#count').textContent = cards.length ? `${hit.length} / ${cards.length} 件` : '';
-  const box = $('#list');
-  box.replaceChildren();
+  for (const b of document.querySelectorAll('.seg button')) b.setAttribute('aria-pressed', String(b.dataset.sort === sortMode));
+  const box = $('#list'), idx = $('#gyo');
+  box.replaceChildren(); idx.replaceChildren();
+  idx.hidden = true;
   if (!hit.length) {
     box.append(cards.length
       ? h('div', { class: 'empty' }, h('strong', {}, '見つかりません'), '別の言葉で探してみてください。')
       : h('div', { class: 'empty' }, h('strong', {}, 'まだ名刺がありません'), '下の「撮影」から1枚目を登録しましょう。'));
     return;
   }
+  if (sortMode === 'recent') { for (const c of hit) box.append(rowFor(c)); return; }
+
+  // あ行〜わ行に区分け
+  const groups = new Map();
   for (const c of hit) {
-    const tags = (c.tags || '').split(/[,、，]/).map((t) => t.trim()).filter(Boolean);
-    box.append(h('button', { class: 'row', type: 'button', onclick: () => openEdit(c) },
-      h('div', { class: 'co' }, c.company || '（会社名なし）'),
-      h('div', { class: 'nm' }, c.name || '（氏名なし）'),
-      (c.department || c.title) && h('div', { class: 'sub' }, [c.department, c.title].filter(Boolean).join('　')),
-      tags.length > 0 && h('div', { class: 'tags' }, tags.map((t) => h('span', { class: 'tag' }, t)))));
+    const rd = readingOf(c, sortMode);
+    const g = gyoOf(rd);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push({ c, rd });
   }
+  const order = [...GYO_TABLE.map(([g]) => g), G_OTHER, G_NONE];
+  const headers = new Map();
+  for (const g of order) {
+    const items = groups.get(g);
+    if (!items) continue;
+    if (g === G_NONE) items.sort((a, b) => b.c.createdAt - a.c.createdAt);
+    else items.sort((a, b) => a.rd.localeCompare(b.rd, 'ja'));
+    const head = h('div', { class: 'gh' }, `${g}　${items.length}件`);
+    headers.set(g, head);
+    box.append(head, ...items.map((x) => rowFor(x.c)));
+  }
+  // 見出しへジャンプするボタン（あ か さ …）
+  const jumps = [...GYO_TABLE.map(([g]) => [g, g[0]]), [G_OTHER, '他'], [G_NONE, '？']];
+  for (const [g, label] of jumps) {
+    const el = headers.get(g);
+    if (g === G_OTHER && !el && headers.has(G_NONE)) continue;
+    if (g === G_NONE && !el) continue;
+    idx.append(h('button', { type: 'button', class: 'jump', disabled: !el, 'aria-label': g, onclick: () => el && el.scrollIntoView({ block: 'start' }) }, label));
+  }
+  idx.hidden = false;
 }
 
 function openEdit(card, isNew = false) {
@@ -572,6 +645,11 @@ $('#manual').addEventListener('click', () => {
 $('#back').addEventListener('click', () => show('list'));
 $('#form').addEventListener('focusin', (e) => { if (e.target.id && e.target.id.startsWith('f-')) lastField = e.target.id; });
 $('#q').addEventListener('input', renderList);
+for (const b of document.querySelectorAll('.seg button')) b.addEventListener('click', () => {
+  sortMode = b.dataset.sort;
+  try { localStorage.setItem('meishi.sort', sortMode); } catch {}
+  renderList();
+});
 for (const b of document.querySelectorAll('nav button')) b.addEventListener('click', () => show(b.dataset.go));
 
 /* ============================================================
