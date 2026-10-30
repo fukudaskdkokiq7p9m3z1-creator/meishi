@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>名刺帳</title>
+<meta name="theme-color" content="#17222B">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="名刺帳">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<!--
+  【任意の安全対策】通信先の制限（CSP）
+  動作確認がすんだら、下の行のコメント記号を外すと、
+  「このアプリは jsdelivr と tessdata 以外には一切通信できない」状態にできます。
+  万一コードに悪いものが混ざっても、名刺データを外へ送れなくなります。
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net; connect-src 'self' https://cdn.jsdelivr.net https://tessdata.projectnaptha.com; worker-src 'self' blob:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; form-action 'none'; base-uri 'none'">
+-->
+
+<style>
+:root{
+  color-scheme: light dark;
+  --paper:#EAEFF2; --surface:#FFFFFF; --ink:#17222B; --steel:#566672; --line:#CBD5DB;
+  --accent:#F2B400; --on-accent:#17222B; --danger:#B3261E; --focus:#0B63CE; --overlay:rgba(23,34,43,.72);
+  --font:"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",system-ui,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{ --paper:#11181D; --surface:#1A242B; --ink:#E8EEF2; --steel:#9AAAB5; --line:#2C3A44; --danger:#FF8A80; --focus:#7DB7FF; --overlay:rgba(0,0,0,.75); }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--font);font-size:16px;line-height:1.6;-webkit-tap-highlight-color:transparent}
+button,input,textarea,select{font:inherit;color:inherit}
+:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+[hidden]{display:none !important}
+
+#app{max-width:640px;margin:0 auto;min-height:100dvh;padding:env(safe-area-inset-top) 0 calc(84px + env(safe-area-inset-bottom))}
+.topbar{display:flex;align-items:center;gap:8px;padding:14px 16px 8px;min-height:56px}
+.topbar h1{margin:0;font-size:22px;font-weight:700;letter-spacing:.02em;flex:1}
+.topbar .count{color:var(--steel);font-size:14px}
+.linkbtn{background:none;border:0;color:var(--focus);font-size:16px;padding:8px 4px;cursor:pointer}
+
+/* 一覧 */
+.search{padding:4px 16px 12px}
+.search input{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:16px}
+.list{border-top:1px solid var(--line)}
+.row{display:block;width:100%;text-align:left;background:var(--surface);border:0;border-bottom:1px solid var(--line);padding:14px 16px;cursor:pointer}
+.row:active{background:var(--paper)}
+.row .co{font-size:13px;color:var(--steel)}
+.row .nm{font-size:19px;font-weight:700;line-height:1.35}
+.row .sub{font-size:14px;color:var(--steel)}
+.row .tags{margin-top:4px;display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-size:12px;border:1px solid var(--line);border-radius:4px;padding:0 6px;color:var(--steel)}
+.empty{padding:40px 24px;text-align:center;color:var(--steel)}
+.empty strong{display:block;color:var(--ink);font-size:18px;margin-bottom:6px}
+
+/* 撮影 */
+.frame{position:relative;margin:8px 20px 20px;aspect-ratio:91/55;background:
+  linear-gradient(var(--line) 1px,transparent 1px) 0 0/24px 24px,
+  linear-gradient(90deg,var(--line) 1px,transparent 1px) 0 0/24px 24px, var(--surface);
+  display:grid;place-items:center;color:var(--steel);font-size:15px}
+.frame i{position:absolute;width:28px;height:28px;border:0 solid var(--accent)}
+.frame i:nth-child(1){left:-6px;top:-6px;border-top-width:5px;border-left-width:5px}
+.frame i:nth-child(2){right:-6px;top:-6px;border-top-width:5px;border-right-width:5px}
+.frame i:nth-child(3){left:-6px;bottom:-6px;border-bottom-width:5px;border-left-width:5px}
+.frame i:nth-child(4){right:-6px;bottom:-6px;border-bottom-width:5px;border-right-width:5px}
+.frame span{background:var(--surface);padding:2px 10px}
+.hint{margin:0 20px 16px;color:var(--steel);font-size:14px}
+.stack{display:grid;gap:12px;padding:0 20px}
+.btn{display:flex;align-items:center;justify-content:center;min-height:52px;padding:0 18px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-weight:700;cursor:pointer;text-align:center}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:var(--on-accent);font-size:18px}
+.btn.danger{color:var(--danger)}
+.btn input{display:none}
+
+/* フォーム */
+.form{padding:0 16px;display:grid;gap:14px}
+.field label{display:block;font-size:13px;color:var(--steel);margin-bottom:2px}
+.field input,.field textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:8px;background:var(--surface);font-size:16px}
+.field textarea{min-height:96px;resize:vertical}
+.quick{display:flex;gap:8px;flex-wrap:wrap}
+.quick a{flex:1;min-width:120px;text-decoration:none;color:var(--ink)}
+.thumb{width:100%;border-radius:6px;border:1px solid var(--line);display:block}
+details{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
+details pre{white-space:pre-wrap;word-break:break-all;font-size:13px;margin:8px 0 0;color:var(--steel)}
+.section{padding:0 16px;margin-bottom:20px}
+.section h2{font-size:16px;margin:20px 0 6px}
+.section p{margin:0 0 10px;color:var(--steel);font-size:14px}
+.section .stack{padding:0}
+
+/* ナビ */
+nav{position:fixed;left:0;right:0;bottom:0;background:var(--surface);border-top:1px solid var(--line);padding:8px 12px calc(8px + env(safe-area-inset-bottom));display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:8px;z-index:5}
+nav button{min-height:48px;border:0;border-radius:8px;background:none;font-weight:700;color:var(--steel);cursor:pointer}
+nav button[aria-current="page"]{color:var(--ink);box-shadow:inset 0 -3px 0 var(--accent)}
+nav button.cta{background:var(--accent);color:var(--on-accent);box-shadow:none}
+
+/* 処理中 */
+.busy{position:fixed;inset:0;background:var(--overlay);display:grid;place-items:center;z-index:20;padding:24px}
+.busy div{background:var(--surface);border-radius:10px;padding:22px;max-width:340px;width:100%}
+.busy p{margin:0 0 12px}
+progress{width:100%;height:10px;accent-color:var(--accent)}
+.toast{position:fixed;left:16px;right:16px;bottom:calc(92px + env(safe-area-inset-bottom));background:var(--ink);color:var(--paper);padding:12px 14px;border-radius:8px;z-index:30;text-align:center;font-size:15px;max-width:608px;margin:0 auto}
+@media (prefers-reduced-motion: no-preference){ .toast{animation:pop .18s ease-out} @keyframes pop{from{opacity:0;transform:translateY(6px)}} }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- 名刺帳（一覧） -->
+  <section id="v-list" class="view">
+    <div class="topbar"><h1>名刺帳</h1><span class="count" id="count"></span></div>
+    <div class="search"><input id="q" type="search" placeholder="名前・会社・メモなどで検索" autocomplete="off" aria-label="検索"></div>
+    <div class="list" id="list"></div>
+  </section>
+
+  <!-- 撮影 -->
+  <section id="v-scan" class="view" hidden>
+    <div class="topbar"><h1>名刺を撮る</h1></div>
+    <div class="frame"><i></i><i></i><i></i><i></i><span>名刺をこの枠に合わせる</span></div>
+    <p class="hint">明るい場所で、名刺を平らな机に置き、真上から撮ります。影や光の反射が入ると読み間違いが増えます。</p>
+    <div class="stack">
+      <label class="btn primary">カメラで撮影する<input id="in-camera" type="file" accept="image/*" capture="environment"></label>
+      <label class="btn">写真から選ぶ<input id="in-photo" type="file" accept="image/*"></label>
+      <button class="btn" id="manual" type="button">手入力で追加する</button>
+    </div>
+  </section>
+
+  <!-- 確認・編集 -->
+  <section id="v-edit" class="view" hidden>
+    <div class="topbar"><button class="linkbtn" id="back" type="button">戻る</button><h1 id="edit-title">内容の確認</h1></div>
+    <div class="form" id="form"></div>
+  </section>
+
+  <!-- 設定 -->
+  <section id="v-set" class="view" hidden>
+    <div class="topbar"><h1>バックアップと設定</h1></div>
+    <div class="section">
+      <h2>データの置き場所</h2>
+      <p>名刺の画像・文字・メモは、この iPhone の中だけに保存されます。サーバーには送りません。そのため、<strong>端末をなくす・壊すとデータも失われます。</strong>定期的にバックアップを取ってください。</p>
+      <p id="storage-info"></p>
+    </div>
+    <div class="section">
+      <h2>バックアップ</h2>
+      <div class="stack">
+        <button class="btn" id="ex-csv" type="button">Excel用に書き出す（CSV）</button>
+        <button class="btn" id="ex-json" type="button">完全バックアップ（JSON・画像つき）</button>
+        <label class="btn">バックアップから戻す（JSON）<input id="im-json" type="file" accept="application/json,.json"></label>
+      </div>
+      <p style="margin-top:10px">書き出したファイルには名刺の個人情報がそのまま入っています。保管場所のパスコードやフォルダの共有設定に注意してください。</p>
+    </div>
+  </section>
+
+</div>
+
+<nav aria-label="メニュー">
+  <button type="button" data-go="list">名刺帳</button>
+  <button type="button" data-go="scan" class="cta">撮影</button>
+  <button type="button" data-go="set">設定</button>
+</nav>
+
+<div class="busy" id="busy" hidden role="status" aria-live="polite"><div><p id="busy-msg"></p><progress id="busy-bar" max="1" value="0"></progress></div></div>
+<div class="toast" id="toast" hidden role="status"></div>
+
+<!-- 文字認識エンジン（Tesseract.js）。名刺の画像はこのエンジンに渡されるだけで、外部へは送られません -->
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script>
+'use strict';
+
+/* ============================================================
+   1. 基本の道具
+   ============================================================ */
+const $ = (s, r = document) => r.querySelector(s);
+
+// 画面部品を作る小さな関数。textContent 経由なので、名刺の文字に悪いタグが入っていても実行されない
+function h(tag, props = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, '');
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const c of kids.flat()) {
+    if (c == null || c === false) continue;
+    e.append(c.nodeType ? c : document.createTextNode(c));
+  }
+  return e;
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), 2600);
+}
+
+function busy(msg, ratio) {
+  $('#busy').hidden = msg == null;
+  if (msg != null) { $('#busy-msg').textContent = msg; $('#busy-bar').value = ratio || 0; }
+}
+
+const FIELDS = [
+  ['name', '氏名', 'text'],
+  ['company', '会社名', 'text'],
+  ['department', '部署', 'text'],
+  ['title', '役職', 'text'],
+  ['phone', '電話', 'tel'],
+  ['mobile', '携帯', 'tel'],
+  ['fax', 'FAX', 'tel'],
+  ['email', 'メール', 'email'],
+  ['url', 'Webサイト', 'url'],
+  ['postal', '郵便番号', 'text'],
+  ['address', '住所', 'text'],
+  ['metOn', '出会った日', 'date'],
+  ['place', '出会った場所（展示会名など）', 'text'],
+  ['tags', 'タグ（カンマ区切り）', 'text'],
+  ['memo', 'メモ', 'textarea'],
+];
+
+/* ============================================================
+   2. 書庫：端末内データベース（IndexedDB）
+   ============================================================ */
+const STORE = 'cards';
+let dbPromise;
+function openDB() {
+  return (dbPromise ||= new Promise((resolve, reject) => {
+    const req = indexedDB.open('meishi', 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(STORE, { keyPath: 'id', autoIncrement: true });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  }));
+}
+function tx(mode, fn) {
+  return openDB().then((db) => new Promise((resolve, reject) => {
+    const t = db.transaction(STORE, mode);
+    const r = fn(t.objectStore(STORE));
+    t.oncomplete = () => resolve(r && r.result);
+    t.onerror = t.onabort = () => reject(t.error);
+  }));
+}
+const dbAll = () => tx('readonly', (s) => s.getAll());
+const dbPut = (c) => tx('readwrite', (s) => s.put(c));
+const dbDel = (id) => tx('readwrite', (s) => s.delete(id));
+
+/* ============================================================
+   3. 読み取り係：画像の下ごしらえ + 文字認識（すべて端末内）
+   ============================================================ */
+const OCR_LOCAL = false; // true にすると ./ocr/ フォルダの部品だけを使う（完全オフライン運用用。README参照）
+
+async function loadBitmap(file) {
+  try { return await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+  catch { return await createImageBitmap(file); }
+}
+function drawScaled(bmp, maxSide) {
+  const sc = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * sc); c.height = Math.round(bmp.height * sc);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return c;
+}
+// 白黒にして明暗の差を広げる。文字がくっきりして読み取りやすくなる
+function enhance(canvas) {
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = img.data;
+  let min = 255, max = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    const g = (d[i] * 0.299 + d[i + 1] * 0.587 + d[i + 2] * 0.114) | 0;
+    d[i] = g; if (g < min) min = g; if (g > max) max = g;
+  }
+  const range = Math.max(1, max - min);
+  for (let i = 0; i < d.length; i += 4) {
+    const v = ((d[i] - min) * 255 / range) | 0;
+    d[i] = d[i + 1] = d[i + 2] = v;
+  }
+  ctx.putImageData(img, 0, 0);
+  return canvas;
+}
+const toBlob = (canvas, type = 'image/jpeg', q = 0.8) => new Promise((res) => canvas.toBlob(res, type, q));
+
+let ocrLogger = null;
+let workerPromise = null;
+function getWorker() {
+  if (!workerPromise) {
+    const opts = { logger: (m) => ocrLogger && ocrLogger(m) };
+    if (OCR_LOCAL) Object.assign(opts, { workerPath: './ocr/worker.min.js', corePath: './ocr/core', langPath: './ocr/lang', gzip: false });
+    workerPromise = Tesseract.createWorker(['jpn', 'eng'], 1, opts).then(async (w) => {
+      await w.setParameters({ preserve_interword_spaces: '1' });
+      return w;
+    }).catch((e) => { workerPromise = null; throw e; });
+  }
+  return workerPromise;
+}
+
+const STATUS_JA = {
+  'loading tesseract core': ['認識エンジンを準備中…', 0.1],
+  'initializing tesseract': ['認識エンジンを準備中…', 0.2],
+  'loading language traineddata': ['日本語データを読み込み中（初回のみ時間がかかります）', null],
+  'initializing api': ['準備しています…', 0.9],
+  'recognizing text': ['名刺を読み取り中…', null],
+};
+
+async function ocrImage(file) {
+  if (!window.Tesseract) throw new Error('文字認識の部品を読み込めませんでした。初回だけインターネット接続が必要です。');
+  const bmp = await loadBitmap(file);
+  const thumb = await toBlob(drawScaled(bmp, 900));
+  const canvas = enhance(drawScaled(bmp, 1800));
+  if (bmp.close) bmp.close();
+  ocrLogger = (m) => {
+    const s = STATUS_JA[m.status];
+    if (s) busy(s[0], s[1] == null ? m.progress : s[1]);
+  };
+  busy('認識エンジンを準備中…', 0.05);
+  const worker = await getWorker();
+  const { data } = await worker.recognize(canvas);
+  return { text: data.text || '', thumb };
+}
+
+/* ============================================================
+   4. 名刺の文字を項目に振り分けるルール
+   ============================================================ */
+const CJK = '\\u3040-\\u30ff\\u3400-\\u9fff々〆ヶ';
+function cleanLine(s) {
+  s = s.normalize('NFKC').trim();
+  // 日本語の文字どうしの間の余計なスペースを消す（OCRがよく入れる）
+  s = s.replace(new RegExp('([' + CJK + '])\\s+(?=[' + CJK + '])', 'g'), '$1');
+  return s;
+}
+const RE = {
+  email: /[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/,
+  url: /(https?:\/\/[^\s]+|www\.[^\s]+)/i,
+  postal: /〒?\s*(\d{3})\s*[-‐]\s*(\d{4})/,
+  phone: /\+?\d[\d\-\s()]{7,}\d/,
+  pref: /(東京都|北海道|(?:京都|大阪)府|.{2,3}県).{1,}[市区町村郡]/,
+  bldg: /(ビル|タワー|階|[0-9]F\b|号室|番地)/,
+  company: /株式会社|有限会社|合同会社|合資会社|一般社団法人|公益財団法人|\(株\)|（株）|㈱|Co\.|Ltd|Inc\.?|Corp|LLC|GmbH|製作所|鉄工所|工業|工機|金属|精機|製造/i,
+  title: /代表取締役|取締役|社長|会長|専務|常務|部長|次長|課長|係長|主任|所長|工場長|店長|マネージャー|ディレクター|Manager|Director|President|CEO|CTO|COO|Engineer|代表|顧問|主幹|技師|リーダー|チーフ/i,
+  dept: /(部|課|室|事業所|営業所|支店|工場|センター|グループ|チーム|Department|Division)$/i,
+  nameJa: new RegExp('^[\\u3400-\\u9fff々〆ヶ]{1,4}[\\s]?[\\u3400-\\u9fffぁ-んァ-ヶ々〆]{1,4}$'),
+  nameEn: /^[A-Z][A-Za-z.\-']+(\s[A-Z][A-Za-z.\-']*)?\s[A-Z][A-Za-z.\-']+$/,
+};
+
+function parseCard(text) {
+  const r = Object.fromEntries(FIELDS.map(([k]) => [k, '']));
+  const lines = text.split(/\r?\n/).map(cleanLine).filter((l) => l.length > 0);
+  const used = new Set();
+  let addrNext = false;
+
+  // 第1段階: 形がはっきりしているもの（メール・URL・電話・住所）
+  lines.forEach((l, i) => {
+    const num = l.replace(/[‐‑‒–—―−]/g, '-').replace(/(\d)[ーｰ](?=\d)/g, '$1-');
+
+    const em = l.match(RE.email);
+    if (em && !r.email) { r.email = em[0]; used.add(i); }
+
+    const um = l.match(RE.url);
+    if (um && !em && !r.url) { r.url = um[0]; used.add(i); }
+
+    if (/\d/.test(num) && !em) {
+      const parts = num.split(/(?=FAX|Fax|ファックス|ファクス)/);
+      for (const p of parts) {
+        const pm = p.match(RE.phone);
+        if (!pm) continue;
+        const n = pm[0].trim().replace(/\s+/g, '').replace(/^\((\d+)\)/, '$1-');
+        if (/^(FAX|Fax|ファックス|ファクス)/.test(p)) r.fax ||= n;
+        else if (/^0[789]0/.test(n)) r.mobile ||= n;
+        else r.phone ||= n;
+        used.add(i);
+      }
+    }
+
+    const pz = l.match(RE.postal);
+    if (pz && !r.postal) {
+      r.postal = pz[1] + '-' + pz[2];
+      const rest = l.replace(pz[0], '').trim();
+      if (rest.length >= 4) { r.address = rest; } else { addrNext = true; }
+      used.add(i);
+    } else if (addrNext && !used.has(i)) {
+      r.address = l; addrNext = false; used.add(i);
+    } else if (!r.address && RE.pref.test(l) && !used.has(i)) {
+      r.address = l; used.add(i);
+    }
+  });
+
+  // 住所の続き（ビル名・階数）を1行だけ連結
+  const ai = lines.findIndex((l, i) => used.has(i) && l.includes(r.address) && r.address);
+  if (ai >= 0 && lines[ai + 1] && !used.has(ai + 1) && RE.bldg.test(lines[ai + 1]) && !RE.company.test(lines[ai + 1])) {
+    r.address += ' ' + lines[ai + 1]; used.add(ai + 1);
+  }
+
+  // 第2段階: 会社名・役職・部署
+  lines.forEach((l, i) => { if (!used.has(i) && !r.company && RE.company.test(l)) { r.company = l; used.add(i); } });
+  lines.forEach((l, i) => {
+    if (used.has(i) || r.title) return;
+    if (RE.title.test(l)) {
+      const parts = l.split(/\s+/);
+      // 「製造部 部長」のように部署と役職が同じ行にある場合は分ける（スペースが消えていても対応）
+      const glued = l.match(/^(.+?[部課室])\s*((?:部長|次長|課長|係長|主任|所長|室長|マネージャー|リーダー|チーフ).*)$/);
+      if (parts.length >= 2 && RE.dept.test(parts[0]) && !r.department) { r.department = parts[0]; r.title = parts.slice(1).join(' '); }
+      else if (glued && !r.department) { r.department = glued[1]; r.title = glued[2]; }
+      else r.title = l;
+      used.add(i);
+    }
+  });
+  lines.forEach((l, i) => { if (!used.has(i) && !r.department && l.length <= 24 && RE.dept.test(l)) { r.department = l; used.add(i); } });
+
+  // 第3段階: 氏名（残った行から、人名らしい形のものを探す）
+  const rest = lines.filter((_, i) => !used.has(i));
+  r.name = rest.find((l) => RE.nameJa.test(l)) || rest.find((l) => RE.nameEn.test(l)) || '';
+
+  r.metOn = new Date().toISOString().slice(0, 10);
+  return r;
+}
+
+/* ============================================================
+   5. 画面
+   ============================================================ */
+let cards = [];
+let current = null; // 編集中の名刺
+
+function show(name) {
+  for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== 'v-' + name;
+  for (const b of document.querySelectorAll('nav button')) b.toggleAttribute('aria-current', b.dataset.go === name && !b.classList.contains('cta'));
+  for (const b of document.querySelectorAll('nav button')) { if (b.dataset.go === name && !b.classList.contains('cta')) b.setAttribute('aria-current', 'page'); else b.removeAttribute('aria-current'); }
+  if (name === 'list') renderList();
+  if (name === 'set') renderSettings();
+  window.scrollTo(0, 0);
+}
+
+const norm = (s) => String(s || '').normalize('NFKC').toLowerCase();
+const searchText = (c) => norm(FIELDS.map(([k]) => c[k]).join(' '));
+
+async function refresh() { cards = (await dbAll()).sort((a, b) => b.createdAt - a.createdAt); }
+
+function renderList() {
+  const q = norm($('#q').value).trim();
+  const hit = q ? cards.filter((c) => q.split(/\s+/).every((w) => searchText(c).includes(w))) : cards;
+  $('#count').textContent = cards.length ? `${hit.length} / ${cards.length} 件` : '';
+  const box = $('#list');
+  box.replaceChildren();
+  if (!hit.length) {
+    box.append(cards.length
+      ? h('div', { class: 'empty' }, h('strong', {}, '見つかりません'), '別の言葉で探してみてください。')
+      : h('div', { class: 'empty' }, h('strong', {}, 'まだ名刺がありません'), '下の「撮影」から1枚目を登録しましょう。'));
+    return;
+  }
+  for (const c of hit) {
+    const tags = (c.tags || '').split(/[,、，]/).map((t) => t.trim()).filter(Boolean);
+    box.append(h('button', { class: 'row', type: 'button', onclick: () => openEdit(c) },
+      h('div', { class: 'co' }, c.company || '（会社名なし）'),
+      h('div', { class: 'nm' }, c.name || '（氏名なし）'),
+      (c.department || c.title) && h('div', { class: 'sub' }, [c.department, c.title].filter(Boolean).join('　')),
+      tags.length > 0 && h('div', { class: 'tags' }, tags.map((t) => h('span', { class: 'tag' }, t)))));
+  }
+}
+
+function openEdit(card, isNew = false) {
+  current = card;
+  $('#edit-title').textContent = isNew ? '内容の確認' : '名刺の詳細';
+  const form = $('#form');
+  form.replaceChildren();
+
+  if (card.image) {
+    const url = URL.createObjectURL(card.image);
+    form.append(h('img', { class: 'thumb', src: url, alt: '撮影した名刺', onload: () => URL.revokeObjectURL(url) }));
+  }
+  if (isNew && card.raw) form.append(h('p', { style: 'margin:0;color:var(--steel);font-size:14px' }, '自動で読み取った結果です。間違いがないか確認して、直してから保存してください。'));
+
+  if (!isNew) {
+    form.append(h('div', { class: 'quick' },
+      card.phone && h('a', { class: 'btn', href: 'tel:' + card.phone.replace(/[^\d+]/g, '') }, '電話する'),
+      card.mobile && h('a', { class: 'btn', href: 'tel:' + card.mobile.replace(/[^\d+]/g, '') }, '携帯にかける'),
+      card.email && h('a', { class: 'btn', href: 'mailto:' + card.email }, 'メールする')));
+  }
+
+  for (const [key, label, type] of FIELDS) {
+    const id = 'f-' + key;
+    const input = type === 'textarea'
+      ? h('textarea', { id, name: key, autocomplete: 'off' })
+      : h('input', { id, name: key, type, autocomplete: 'off', autocapitalize: 'none', spellcheck: 'false', inputmode: type === 'tel' ? 'tel' : null });
+    input.value = card[key] || '';
+    form.append(h('div', { class: 'field' }, h('label', { for: id }, label), input));
+  }
+
+  if (card.raw) form.append(h('details', {}, h('summary', {}, '読み取った元の文字を見る'), h('pre', {}, card.raw)));
+
+  form.append(h('div', { class: 'stack', style: 'padding:0;margin-top:6px' },
+    h('button', { class: 'btn primary', type: 'button', onclick: saveCurrent }, '保存する'),
+    !isNew && h('button', { class: 'btn danger', type: 'button', onclick: deleteCurrent }, 'この名刺を削除する')));
+
+  show('edit');
+}
+
+async function saveCurrent() {
+  const c = { ...current };
+  for (const [key] of FIELDS) c[key] = $('#f-' + key).value.trim();
+  if (!c.name && !c.company) { toast('氏名か会社名のどちらかは入力してください'); return; }
+  c.createdAt ||= Date.now();
+  c.updatedAt = Date.now();
+  try {
+    await dbPut(c);
+    if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+  } catch (e) { toast('保存できませんでした。プライベートブラウズでは使えません。'); return; }
+  await refresh();
+  toast('保存しました');
+  show('list');
+}
+
+async function deleteCurrent() {
+  if (!confirm('この名刺を削除します。元に戻せません。よろしいですか？')) return;
+  await dbDel(current.id);
+  await refresh();
+  toast('削除しました');
+  show('list');
+}
+
+/* ---------- 撮影 → 読み取り → 確認 ---------- */
+async function onPicked(file) {
+  if (!file) return;
+  try {
+    const { text, thumb } = await ocrImage(file);
+    busy(null);
+    const fields = parseCard(text);
+    openEdit({ ...fields, image: thumb, raw: text }, true);
+    if (!text.trim()) toast('文字を読み取れませんでした。手入力するか、撮り直してください。');
+  } catch (e) {
+    busy(null);
+    alert('読み取りに失敗しました。\n' + (e && e.message ? e.message : e));
+  }
+}
+$('#in-camera').addEventListener('change', (e) => { onPicked(e.target.files[0]); e.target.value = ''; });
+$('#in-photo').addEventListener('change', (e) => { onPicked(e.target.files[0]); e.target.value = ''; });
+$('#manual').addEventListener('click', () => {
+  openEdit(Object.assign(Object.fromEntries(FIELDS.map(([k]) => [k, ''])), { metOn: new Date().toISOString().slice(0, 10), image: null, raw: '' }), true);
+});
+$('#back').addEventListener('click', () => show('list'));
+$('#q').addEventListener('input', renderList);
+for (const b of document.querySelectorAll('nav button')) b.addEventListener('click', () => show(b.dataset.go));
+
+/* ============================================================
+   6. バックアップ
+   ============================================================ */
+const blobToDataURL = (b) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(b); });
+const dataURLToBlob = async (u) => (await fetch(u)).blob();
+
+async function deliver(blob, filename) {
+  const file = new File([blob], filename, { type: blob.type });
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file], title: filename }); return; } catch (e) { if (e.name === 'AbortError') return; }
+  }
+  const a = h('a', { href: URL.createObjectURL(blob), download: filename });
+  document.body.append(a); a.click(); a.remove();
+}
+
+// Excelで開いたとき、先頭が = + - @ の文字が「計算式」として実行されないようにする
+const csvCell = (v) => {
+  let s = String(v ?? '');
+  if (/^[=@]/.test(s) || /^[+\-][^\d]/.test(s)) s = "'" + s;
+  return '"' + s.replace(/"/g, '""') + '"';
+};
+const stamp = () => new Date().toISOString().slice(0, 10);
+
+$('#ex-csv').addEventListener('click', async () => {
+  if (!cards.length) { toast('書き出す名刺がありません'); return; }
+  const head = FIELDS.map(([, label]) => csvCell(label)).join(',');
+  const body = cards.map((c) => FIELDS.map(([k]) => csvCell(c[k])).join(',')).join('\r\n');
+  await deliver(new Blob(['\uFEFF' + head + '\r\n' + body], { type: 'text/csv' }), `meishi-${stamp()}.csv`);
+});
+
+$('#ex-json').addEventListener('click', async () => {
+  if (!cards.length) { toast('書き出す名刺がありません'); return; }
+  busy('バックアップを作成中…', 0.5);
+  const out = [];
+  for (const c of cards) {
+    const { id, ...rest } = c;
+    out.push({ ...rest, image: c.image ? await blobToDataURL(c.image) : null });
+  }
+  busy(null);
+  await deliver(new Blob([JSON.stringify({ app: 'meishi', version: 1, cards: out })], { type: 'application/json' }), `meishi-backup-${stamp()}.json`);
+});
+
+$('#im-json').addEventListener('change', async (e) => {
+  const file = e.target.files[0]; e.target.value = '';
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    if (data.app !== 'meishi' || !Array.isArray(data.cards)) throw new Error('名刺帳のバックアップではありません');
+    if (!confirm(`${data.cards.length} 件を追加します。よろしいですか？（今ある名刺は消えません）`)) return;
+    busy('復元中…', 0.5);
+    for (const raw of data.cards) {
+      const c = { createdAt: Number(raw.createdAt) || Date.now(), updatedAt: Number(raw.updatedAt) || Date.now(), raw: typeof raw.raw === 'string' ? raw.raw : '' };
+      for (const [k] of FIELDS) c[k] = typeof raw[k] === 'string' ? raw[k] : '';
+      c.image = typeof raw.image === 'string' && raw.image.startsWith('data:image/') ? await dataURLToBlob(raw.image) : null;
+      await dbPut(c);
+    }
+    await refresh(); busy(null); toast('復元しました'); show('list');
+  } catch (err) { busy(null); alert('復元できませんでした。\n' + err.message); }
+});
+
+async function renderSettings() {
+  let msg = `保存件数: ${cards.length} 件`;
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const { usage } = await navigator.storage.estimate();
+      msg += ` ／ 使用容量: 約 ${(usage / 1048576).toFixed(1)} MB`;
+    }
+    if (navigator.storage && navigator.storage.persisted) {
+      msg += (await navigator.storage.persisted()) ? ' ／ 自動削除の保護: あり' : ' ／ 自動削除の保護: なし（ホーム画面に追加すると安全です）';
+    }
+  } catch {}
+  $('#storage-info').textContent = msg;
+}
+
+/* ============================================================
+   7. 起動
+   ============================================================ */
+(async function init() {
+  try { await refresh(); } catch { toast('この環境ではデータを保存できません（プライベートブラウズなど）'); }
+  show('list');
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('./sw.js').catch(() => {});
+})();
+</script>
+</body>
+</html>
