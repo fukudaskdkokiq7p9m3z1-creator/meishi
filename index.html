@@ -83,7 +83,10 @@ button,input,textarea,select{font:inherit;color:inherit}
 .quick a{flex:1;min-width:120px;text-decoration:none;color:var(--ink)}
 .thumb{width:100%;border-radius:6px;border:1px solid var(--line);display:block}
 details{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:10px 12px}
-details pre{white-space:pre-wrap;word-break:break-all;font-size:13px;margin:8px 0 0;color:var(--steel)}
+details summary{cursor:pointer}
+.rawhint{margin:8px 0;font-size:13px;color:var(--steel)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:var(--paper);border-radius:6px;padding:6px 10px;font-size:15px;cursor:pointer;text-align:left}
 .section{padding:0 16px;margin-bottom:20px}
 .section h2{font-size:16px;margin:20px 0 6px}
 .section p{margin:0 0 10px;color:var(--steel);font-size:14px}
@@ -335,12 +338,17 @@ const RE = {
   phone: /\+?\d[\d\-\s()]{7,}\d/,
   pref: /(東京都|北海道|(?:京都|大阪)府|.{2,3}県).{1,}[市区町村郡]/,
   bldg: /(ビル|タワー|階|[0-9]F\b|号室|番地)/,
-  company: /株式会社|有限会社|合同会社|合資会社|一般社団法人|公益財団法人|\(株\)|（株）|㈱|Co\.|Ltd|Inc\.?|Corp|LLC|GmbH|製作所|鉄工所|工業|工機|金属|精機|製造/i,
+  company: /株式会社|有限会社|合同会社|合資会社|一般社団法人|公益財団法人|\(株\)|（株）|㈱|Co\.|Ltd|Inc\.?|Corp|LLC|GmbH|製作所|鉄工所|鉄工|工業|工機|金属|精機|精工|製造|工作|工房|機械|産業|電機|商事|商会|プレス|板金|溶接|切削|鋳造|鍛造|金型|テック|システム|サービス|ホールディングス/i,
   title: /代表取締役|取締役|社長|会長|専務|常務|部長|次長|課長|係長|主任|所長|工場長|店長|マネージャー|ディレクター|Manager|Director|President|CEO|CTO|COO|Engineer|代表|顧問|主幹|技師|リーダー|チーフ/i,
   dept: /(部|課|室|事業所|営業所|支店|工場|センター|グループ|チーム|Department|Division)$/i,
   nameJa: new RegExp('^[\\u3400-\\u9fff々〆ヶ]{1,4}[\\s]?[\\u3400-\\u9fffぁ-んァ-ヶ々〆]{1,4}$'),
   nameEn: /^[A-Z][A-Za-z.\-']+(\s[A-Z][A-Za-z.\-']*)?\s[A-Z][A-Za-z.\-']+$/,
 };
+
+const TITLE_G = new RegExp(RE.title.source, 'gi');
+const NAME_ONLY = new RegExp('^[' + CJK + 'ー]+$');
+const NOT_NAME = /部|課|室|営業|技術|製造|総務|開発|品質|工場|支店|本社|事業/;
+const NAME_HEAD = new RegExp('^([\\u3400-\\u9fff々〆ヶ][' + CJK + 'ー]{1,6})(?:\\s+[A-Za-z .\\-\']+)?$');
 
 function parseCard(text) {
   const r = Object.fromEntries(FIELDS.map(([k]) => [k, '']));
@@ -400,15 +408,32 @@ function parseCard(text) {
       const glued = l.match(/^(.+?[部課室])\s*((?:部長|次長|課長|係長|主任|所長|室長|マネージャー|リーダー|チーフ).*)$/);
       if (parts.length >= 2 && RE.dept.test(parts[0]) && !r.department) { r.department = parts[0]; r.title = parts.slice(1).join(' '); }
       else if (glued && !r.department) { r.department = glued[1]; r.title = glued[2]; }
-      else r.title = l;
+      else {
+        // 「代表取締役 山田太郎」のように役職と氏名が同じ行にある場合は、役職の語を除いた残りを氏名にする
+        const ms = l.match(TITLE_G) || [];
+        const rem = l.replace(TITLE_G, '').replace(/[\s|｜\/・,，、]+/g, '');
+        if (!r.name && rem.length >= 3 && rem.length <= 8 && NAME_ONLY.test(rem) && !NOT_NAME.test(rem)) { r.name = rem; r.title = ms.join(''); }
+        else r.title = l;
+      }
       used.add(i);
     }
   });
   lines.forEach((l, i) => { if (!used.has(i) && !r.department && l.length <= 24 && RE.dept.test(l)) { r.department = l; used.add(i); } });
 
   // 第3段階: 氏名（残った行から、人名らしい形のものを探す）
-  const rest = lines.filter((_, i) => !used.has(i));
-  r.name = rest.find((l) => RE.nameJa.test(l)) || rest.find((l) => RE.nameEn.test(l)) || '';
+  const rest = lines
+    .map((l, i) => ({ l: l.replace(/[|｜\[\]「」『』*•·_~`"“”]/g, '').trim(), i }))
+    .filter((o) => o.l && !used.has(o.i))
+    .map((o) => o.l);
+  const hasDigit = (l) => /[\d@]/.test(l);
+  if (!r.name) {
+    r.name =
+      rest.find((l) => RE.nameJa.test(l) && !RE.company.test(l)) ||              // 山田太郎
+      (rest.map((l) => l.match(NAME_HEAD)).find((m) => m && !RE.company.test(m[1])) || [])[1] || // 山田太郎 Taro Yamada
+      rest.find((l) => RE.nameEn.test(l)) ||                                      // Taro Yamada
+      rest.find((l) => /^[ぁ-んァ-ヶー]{3,10}$/.test(l)) ||                        // やまだたろう（ひらがな・カタカナ）
+      rest.find((l) => l.length <= 10 && new RegExp('[' + CJK + ']').test(l) && !hasDigit(l) && !RE.company.test(l)) || '';
+  }
 
   r.metOn = new Date().toISOString().slice(0, 10);
   return r;
@@ -419,6 +444,7 @@ function parseCard(text) {
    ============================================================ */
 let cards = [];
 let current = null; // 編集中の名刺
+let lastField = 'f-name'; // 最後に触った入力欄（行タップの入力先）
 
 function show(name) {
   for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== 'v-' + name;
@@ -484,7 +510,15 @@ function openEdit(card, isNew = false) {
     form.append(h('div', { class: 'field' }, h('label', { for: id }, label), input));
   }
 
-  if (card.raw) form.append(h('details', {}, h('summary', {}, '読み取った元の文字を見る'), h('pre', {}, card.raw)));
+  if (card.raw) {
+    const rawLines = [...new Set(card.raw.split(/\r?\n/).map(cleanLine).filter(Boolean))];
+    const open = isNew && !card.name;
+    form.append(h('details', { open }, h('summary', {}, open ? '氏名を判定できませんでした。ここから選んでください' : '読み取った行（タップで入力欄に入れる）'),
+      h('p', { class: 'rawhint' }, '先に入れたい欄（氏名など）をタップしてから、下の行をタップします。'),
+      h('div', { class: 'chips' }, rawLines.map((ln) => h('button', { class: 'chip', type: 'button', onclick: () => {
+        const t = $('#' + lastField); t.value = ln; t.focus();
+      } }, ln)))));
+  }
 
   form.append(h('div', { class: 'stack', style: 'padding:0;margin-top:6px' },
     h('button', { class: 'btn primary', type: 'button', onclick: saveCurrent }, '保存する'),
@@ -536,6 +570,7 @@ $('#manual').addEventListener('click', () => {
   openEdit(Object.assign(Object.fromEntries(FIELDS.map(([k]) => [k, ''])), { metOn: new Date().toISOString().slice(0, 10), image: null, raw: '' }), true);
 });
 $('#back').addEventListener('click', () => show('list'));
+$('#form').addEventListener('focusin', (e) => { if (e.target.id && e.target.id.startsWith('f-')) lastField = e.target.id; });
 $('#q').addEventListener('input', renderList);
 for (const b of document.querySelectorAll('nav button')) b.addEventListener('click', () => show(b.dataset.go));
 
